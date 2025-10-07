@@ -19,6 +19,6 @@ An optional **Streamlit app** provides a simple user interface.
 - **Backend:** FastAPI  
 - **AI Model:** OpenRouter API  
 - **Web Search:** DuckDuckGo Search (ddgs)  
-- **Frontend ** Streamlit  
+- **Frontend  Streamlit  
 
 
