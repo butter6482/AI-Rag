@@ -61,16 +61,30 @@ def _search_web(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]
     textos: List[str] = []
     sources: List[Dict[str, str]] = []
 
-    with DDGS() as ddgs:
-        for r in ddgs.text(query, max_results=max_results):
-            title = (r.get("title") or "").strip()
-            url = (r.get("href") or "").strip()
-            body_html = r.get("body") or ""
-            snippet = BeautifulSoup(body_html, "html.parser").get_text().strip()
-            if snippet:
-                textos.append(snippet)
-            if title and url:
-                sources.append({"title": title, "url": url})
+    try:
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=max_results):
+                title = (r.get("title") or "").strip()
+                url = (r.get("href") or "").strip()
+                body_html = r.get("body") or ""
+                
+                # Skip if body contains JavaScript or is empty
+                if not body_html or "javascript" in body_html.lower() or "d.js" in body_html:
+                    continue
+                    
+                snippet = BeautifulSoup(body_html, "html.parser").get_text().strip()
+                
+                # Only add if we have meaningful content
+                if snippet and len(snippet) > 10:
+                    textos.append(snippet)
+                    
+                if title and url and not url.startswith("javascript:"):
+                    sources.append({"title": title, "url": url})
+                    
+    except Exception as e:
+        print(f"Search error: {e}")
+        # Return empty results instead of crashing
+        pass
 
     context_text = _truncate("\n\n".join(textos), 7500)
     return context_text, sources
@@ -150,7 +164,15 @@ def generar_respuesta(query: str, contexto: str, lang_hint: str | None = None, m
         return f"Generation error: {e}"
 
 def buscar_web_y_generar(query: str, model: str | None = None):
-    contexto, sources = buscar_web(query)
-    lang = _detect_lang(query)
-    answer = generar_respuesta(query, contexto, lang_hint=lang, model=model)
-    return {"contexto": contexto, "respuesta": answer, "sources": sources}
+    try:
+        contexto, sources = buscar_web(query)
+        lang = _detect_lang(query)
+        answer = generar_respuesta(query, contexto, lang_hint=lang, model=model)
+        return {"contexto": contexto, "respuesta": answer, "sources": sources}
+    except Exception as e:
+        # Return a safe fallback response
+        return {
+            "contexto": "No se pudo obtener contexto web debido a un error técnico.",
+            "respuesta": f"Lo siento, hubo un error procesando tu pregunta: {str(e)}. Por favor intenta con una pregunta diferente.",
+            "sources": []
+        }
