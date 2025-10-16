@@ -124,6 +124,42 @@ def buscar_web(query: str) -> Tuple[str, List[Dict[str, str]]]:
         ctx = "No relevant results were found on the web."
     return ctx, src
 
+def generar_respuesta_directa(query: str, system: str, user: str, model: str | None = None) -> str:
+    """
+    Generate an answer directly without web context.
+    """
+    model_id = _resolve_model(model)
+    
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+        "HTTP-Referer": "http://localhost:8080",
+        "X-Title": "AI-RAG Assistant",
+    }
+    
+    payload = {
+        "model": model_id,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": user},
+        ],
+        "temperature": 0.3,
+        "max_tokens": 800,
+    }
+    
+    try:
+        resp = requests.post(f"{BASE_URL}/chat/completions", headers=headers, json=payload, timeout=60)
+        if resp.status_code != 200:
+            try:
+                err = resp.json()
+            except Exception:
+                err = {"raw": resp.text}
+            return f"OpenRouter error ({resp.status_code}): {json.dumps(err, ensure_ascii=False)}"
+        data = resp.json()
+        return data["choices"][0]["message"]["content"]
+    except Exception as e:
+        return f"Generation error: {e}"
+
 def generar_respuesta(query: str, contexto: str, lang_hint: str | None = None, model: str | None = None) -> str:
     """
     Generate an answer using OpenRouter chat/completions.
@@ -192,6 +228,32 @@ def buscar_web_y_generar(query: str, model: str | None = None):
         
         lang = _detect_lang(query)
         print(f"[RAG] Detected language: {lang}")
+        
+        # If no web context found, generate answer without web search
+        if not contexto or len(contexto.strip()) < 50:
+            print(f"[RAG] No web context found, generating answer without web search")
+            if lang == "es":
+                system = (
+                    "Eres un asistente útil que responde en español. "
+                    "Responde de manera clara y concisa basándote en tu conocimiento. "
+                    "Si no tienes información actualizada, menciona que la información puede haber cambiado."
+                )
+                user = f"Pregunta: {query}\n\nResponde en español de manera útil y clara."
+            else:
+                system = (
+                    "You are a helpful assistant that answers in English. "
+                    "Respond clearly and concisely based on your knowledge. "
+                    "If you don't have current information, mention that information may have changed."
+                )
+                user = f"Question: {query}\n\nAnswer in English in a helpful and clear way."
+            
+            # Generate answer without web context
+            answer = generar_respuesta_directa(query, system, user, model)
+            return {
+                "contexto": "No se pudo obtener contexto web actualizado.",
+                "respuesta": answer,
+                "sources": []
+            }
         
         answer = generar_respuesta(query, contexto, lang_hint=lang, model=model)
         return {"contexto": contexto, "respuesta": answer, "sources": sources}
