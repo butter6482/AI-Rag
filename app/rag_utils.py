@@ -53,6 +53,58 @@ def _detect_lang(text: str) -> str:
     # Default to English
     return "en"
 
+def _search_web_google(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]]:
+    """
+    Search using Google directly (without API key)
+    """
+    textos: List[str] = []
+    sources: List[Dict[str, str]] = []
+    
+    try:
+        # Google search URL
+        search_url = f"https://www.google.com/search?q={query.replace(' ', '+')}&num={max_results}"
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        }
+        
+        print(f"[RAG] Searching Google: {search_url}")
+        response = requests.get(search_url, headers=headers, timeout=10)
+        
+        if response.status_code == 200:
+            soup = BeautifulSoup(response.content, 'html.parser')
+            
+            # Find search results
+            results = soup.find_all('div', class_='g')
+            
+            for result in results[:max_results]:
+                try:
+                    # Extract title
+                    title_elem = result.find('h3')
+                    title = title_elem.get_text() if title_elem else ""
+                    
+                    # Extract URL
+                    link_elem = result.find('a')
+                    url = link_elem.get('href') if link_elem else ""
+                    
+                    # Extract snippet
+                    snippet_elem = result.find('span', class_='st') or result.find('div', class_='VwiC3b')
+                    snippet = snippet_elem.get_text() if snippet_elem else ""
+                    
+                    if title and url and snippet:
+                        textos.append(f"{title}: {snippet}")
+                        sources.append({"title": title, "url": url})
+                        print(f"[RAG] Added Google result: {title}")
+                        
+                except Exception as e:
+                    print(f"[RAG] Error parsing Google result: {e}")
+                    continue
+                    
+    except Exception as e:
+        print(f"[RAG] Google search error: {e}")
+    
+    return "\n\n".join(textos), sources
+
 def _search_web(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]]:
     """
     Return (context_text, sources). Sources is a list of {title, url}.
@@ -61,63 +113,74 @@ def _search_web(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]
     textos: List[str] = []
     sources: List[Dict[str, str]] = []
 
-    try:
-        with DDGS() as ddgs:
-            # Try multiple search methods with different parameters
-            search_attempts = [
-                # Regular text search
-                lambda: ddgs.text(query, max_results=max_results),
-                # News search
-                lambda: ddgs.news(query, max_results=max_results),
-                # Text search with different region
-                lambda: ddgs.text(query, max_results=max_results, region='us-en'),
-                # News search with different region
-                lambda: ddgs.news(query, max_results=max_results, region='us-en'),
-            ]
-            
-            for i, search_method in enumerate(search_attempts):
-                try:
-                    print(f"[RAG] Trying search method {i+1}")
-                    results = list(search_method())
-                    print(f"[RAG] Got {len(results)} results from method {i+1}")
-                    
-                    for r in results:
-                        title = (r.get("title") or "").strip()
-                        url = (r.get("href") or "").strip()
-                        body_html = r.get("body") or ""
+    # Try Google search first
+    print(f"[RAG] Trying Google search")
+    google_text, google_sources = _search_web_google(query, max_results)
+    if google_text:
+        textos.append(google_text)
+        sources.extend(google_sources)
+        print(f"[RAG] Google search successful: {len(google_sources)} sources")
+
+    # If Google didn't work, try DuckDuckGo as fallback
+    if not textos:
+        print(f"[RAG] Google failed, trying DuckDuckGo")
+        try:
+            with DDGS() as ddgs:
+                # Try different search methods with different parameters
+                search_attempts = [
+                    # Regular text search
+                    lambda: ddgs.text(query, max_results=max_results),
+                    # News search
+                    lambda: ddgs.news(query, max_results=max_results),
+                    # Text search with different region
+                    lambda: ddgs.text(query, max_results=max_results, region='us-en'),
+                    # News search with different region
+                    lambda: ddgs.news(query, max_results=max_results, region='us-en'),
+                ]
+                
+                for i, search_method in enumerate(search_attempts):
+                    try:
+                        print(f"[RAG] Trying DDG search method {i+1}")
+                        results = list(search_method())
+                        print(f"[RAG] Got {len(results)} results from DDG method {i+1}")
                         
-                        # Very lenient filtering - accept almost everything
-                        if body_html and "javascript:" in body_html.lower():
-                            continue
+                        for r in results:
+                            title = (r.get("title") or "").strip()
+                            url = (r.get("href") or "").strip()
+                            body_html = r.get("body") or ""
                             
-                        # Use title as fallback if body is empty
-                        if not body_html and title:
-                            body_html = title
+                            # Very lenient filtering - accept almost everything
+                            if body_html and "javascript:" in body_html.lower():
+                                continue
+                                
+                            # Use title as fallback if body is empty
+                            if not body_html and title:
+                                body_html = title
+                                
+                            snippet = BeautifulSoup(body_html, "html.parser").get_text().strip()
                             
-                        snippet = BeautifulSoup(body_html, "html.parser").get_text().strip()
+                            # Very lenient content filtering - accept anything with content
+                            if snippet and len(snippet) > 3:
+                                textos.append(snippet)
+                                print(f"[RAG] Added DDG snippet: {snippet[:100]}...")
+                                
+                            if title and url and not url.startswith("javascript:"):
+                                sources.append({"title": title, "url": url})
+                                print(f"[RAG] Added DDG source: {title}")
+                                
+                        # If we got good results, break
+                        if len(textos) >= 3:  # We want at least 3 good snippets
+                            print(f"[RAG] Got enough DDG results, stopping search")
+                            break
+                            
+                    except Exception as e:
+                        print(f"[RAG] DDG search method {i+1} error: {e}")
+                        continue
                         
-                        # Very lenient content filtering - accept anything with content
-                        if snippet and len(snippet) > 3:
-                            textos.append(snippet)
-                            print(f"[RAG] Added snippet: {snippet[:100]}...")
-                            
-                        if title and url and not url.startswith("javascript:"):
-                            sources.append({"title": title, "url": url})
-                            print(f"[RAG] Added source: {title}")
-                            
-                    # If we got good results, break
-                    if len(textos) >= 3:  # We want at least 3 good snippets
-                        print(f"[RAG] Got enough results, stopping search")
-                        break
-                        
-                except Exception as e:
-                    print(f"[RAG] Search method {i+1} error: {e}")
-                    continue
-                    
-    except Exception as e:
-        print(f"[RAG] Search error: {e}")
-        # Return empty results instead of crashing
-        pass
+        except Exception as e:
+            print(f"[RAG] DDG search error: {e}")
+            # Return empty results instead of crashing
+            pass
 
     context_text = _truncate("\n\n".join(textos), 7500)
     print(f"[RAG] Final context length: {len(context_text)}, sources: {len(sources)}")
