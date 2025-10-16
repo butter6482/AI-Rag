@@ -3,7 +3,7 @@ import os, requests, streamlit as st
 
 # In Render, we need to use the same port as the service
 PORT = os.getenv("PORT", "8080")
-API_URL = os.getenv("API_URL", f"http://localhost:{PORT}")
+API_URL = os.getenv("API_URL", f"http://127.0.0.1:8080")
 
 st.set_page_config(page_title="AI RAG Assistant", page_icon=None, layout="centered")
 

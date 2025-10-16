@@ -4,11 +4,11 @@
 python -m uvicorn app.main:app --host 0.0.0.0 --port 8080 &
 BACKEND_PID=$!
 
-# Wait a moment for backend to start
-sleep 3
+# Wait for backend to start
+sleep 5
 
-# Start frontend
-streamlit run streamlit_app.py --server.port=$PORT --server.address=0.0.0.0
+# Start frontend on the port Render expects
+streamlit run streamlit_app.py --server.port=${PORT:-8501} --server.address=0.0.0.0 --server.headless=true
 
 # Kill backend when frontend stops
 kill $BACKEND_PID
