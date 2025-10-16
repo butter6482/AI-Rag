@@ -24,6 +24,8 @@ RUN pip install --upgrade pip && \
 # Copy application code
 COPY app /app/app
 COPY streamlit_app.py /app/streamlit_app.py
+COPY start.sh /app/start.sh
+RUN chmod +x /app/start.sh
 
 # Create non-root user
 RUN useradd -ms /bin/bash appuser && \
@@ -33,5 +35,5 @@ USER appuser
 # Expose ports
 EXPOSE 8080 8501
 
-# Default command: run backend
-CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
+# Default command: run both services
+CMD ["/app/start.sh"]
