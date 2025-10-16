@@ -63,23 +63,44 @@ def _search_web(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]
 
     try:
         with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=max_results):
-                title = (r.get("title") or "").strip()
-                url = (r.get("href") or "").strip()
-                body_html = r.get("body") or ""
-                
-                # Skip if body contains JavaScript or is empty
-                if not body_html or "javascript" in body_html.lower() or "d.js" in body_html:
+            # Try different search methods
+            search_methods = [
+                lambda: ddgs.text(query, max_results=max_results),
+                lambda: ddgs.news(query, max_results=max_results),
+            ]
+            
+            for search_method in search_methods:
+                try:
+                    results = search_method()
+                    for r in results:
+                        title = (r.get("title") or "").strip()
+                        url = (r.get("href") or "").strip()
+                        body_html = r.get("body") or ""
+                        
+                        # More lenient filtering - only skip obvious JavaScript
+                        if body_html and "javascript:" in body_html.lower():
+                            continue
+                            
+                        # Use title as fallback if body is empty
+                        if not body_html and title:
+                            body_html = title
+                            
+                        snippet = BeautifulSoup(body_html, "html.parser").get_text().strip()
+                        
+                        # More lenient content filtering
+                        if snippet and len(snippet) > 5:
+                            textos.append(snippet)
+                            
+                        if title and url and not url.startswith("javascript:"):
+                            sources.append({"title": title, "url": url})
+                            
+                    # If we got results, break
+                    if textos:
+                        break
+                        
+                except Exception as e:
+                    print(f"Search method error: {e}")
                     continue
-                    
-                snippet = BeautifulSoup(body_html, "html.parser").get_text().strip()
-                
-                # Only add if we have meaningful content
-                if snippet and len(snippet) > 10:
-                    textos.append(snippet)
-                    
-                if title and url and not url.startswith("javascript:"):
-                    sources.append({"title": title, "url": url})
                     
     except Exception as e:
         print(f"Search error: {e}")
@@ -165,11 +186,17 @@ def generar_respuesta(query: str, contexto: str, lang_hint: str | None = None, m
 
 def buscar_web_y_generar(query: str, model: str | None = None):
     try:
+        print(f"[RAG] Searching for: {query}")
         contexto, sources = buscar_web(query)
+        print(f"[RAG] Found {len(sources)} sources, context length: {len(contexto)}")
+        
         lang = _detect_lang(query)
+        print(f"[RAG] Detected language: {lang}")
+        
         answer = generar_respuesta(query, contexto, lang_hint=lang, model=model)
         return {"contexto": contexto, "respuesta": answer, "sources": sources}
     except Exception as e:
+        print(f"[RAG] Error: {e}")
         # Return a safe fallback response
         return {
             "contexto": "No se pudo obtener contexto web debido a un error técnico.",
