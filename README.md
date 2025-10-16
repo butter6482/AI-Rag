@@ -38,7 +38,7 @@ docker run --rm -p 8501:8501 \
 
 1) Install dependencies:
 ```bash
-pip install -r requirements.txt -r requirements-dev.txt
+pip install -r requirements.txt
 ```
 
 2) Set environment variables:
@@ -57,13 +57,6 @@ python -m uvicorn app.main:app --reload --port 8080
 4) Start frontend:
 ```bash
 streamlit run streamlit_app.py
-```
-
-## Testing
-
-```bash
-# Run tests (no network required)
-pytest -q
 ```
 
 ## Features
