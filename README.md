@@ -73,3 +73,40 @@ pytest -q
 - Single model: google/gemma-2-9b-it via OpenRouter
 - Minimal English-only UI
 - Production-ready Docker setup
+
+## Deployment on Render
+
+### Option 1: Using GitHub Container Registry (GHCR)
+
+1. **Push your code to GitHub** (triggers automatic build):
+   ```bash
+   git add .
+   git commit -m "Ready for deployment"
+   git push origin main
+   ```
+
+2. **Wait for GitHub Actions** to build and push to GHCR
+
+3. **Deploy on Render** using the image:
+   ```
+   ghcr.io/your-username/ai-rag:latest
+   ```
+
+### Option 2: Direct Docker Build on Render
+
+1. **Connect your GitHub repo** to Render
+2. **Select "Web Service"**
+3. **Choose "Docker" as environment**
+4. **Set environment variables**:
+   - `OPENROUTER_API_KEY`: your API key
+   - `OPENROUTER_BASE_URL`: https://openrouter.ai/api/v1
+   - `LLM_MODEL`: google/gemma-2-9b-it
+
+## Tech Stack
+
+- **Backend:** FastAPI
+- **AI Model:** OpenRouter API (Gemma 2 9B)
+- **Web Search:** DuckDuckGo Search
+- **Frontend:** Streamlit
+- **Containerization:** Docker
+- **CI/CD:** GitHub Actions
