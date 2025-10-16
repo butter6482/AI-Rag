@@ -63,21 +63,30 @@ def _search_web(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]
 
     try:
         with DDGS() as ddgs:
-            # Try different search methods
-            search_methods = [
+            # Try multiple search methods with different parameters
+            search_attempts = [
+                # Regular text search
                 lambda: ddgs.text(query, max_results=max_results),
+                # News search
                 lambda: ddgs.news(query, max_results=max_results),
+                # Text search with different region
+                lambda: ddgs.text(query, max_results=max_results, region='us-en'),
+                # News search with different region
+                lambda: ddgs.news(query, max_results=max_results, region='us-en'),
             ]
             
-            for search_method in search_methods:
+            for i, search_method in enumerate(search_attempts):
                 try:
-                    results = search_method()
+                    print(f"[RAG] Trying search method {i+1}")
+                    results = list(search_method())
+                    print(f"[RAG] Got {len(results)} results from method {i+1}")
+                    
                     for r in results:
                         title = (r.get("title") or "").strip()
                         url = (r.get("href") or "").strip()
                         body_html = r.get("body") or ""
                         
-                        # More lenient filtering - only skip obvious JavaScript
+                        # Very lenient filtering - accept almost everything
                         if body_html and "javascript:" in body_html.lower():
                             continue
                             
@@ -87,41 +96,63 @@ def _search_web(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]
                             
                         snippet = BeautifulSoup(body_html, "html.parser").get_text().strip()
                         
-                        # More lenient content filtering
-                        if snippet and len(snippet) > 5:
+                        # Very lenient content filtering - accept anything with content
+                        if snippet and len(snippet) > 3:
                             textos.append(snippet)
+                            print(f"[RAG] Added snippet: {snippet[:100]}...")
                             
                         if title and url and not url.startswith("javascript:"):
                             sources.append({"title": title, "url": url})
+                            print(f"[RAG] Added source: {title}")
                             
-                    # If we got results, break
-                    if textos:
+                    # If we got good results, break
+                    if len(textos) >= 3:  # We want at least 3 good snippets
+                        print(f"[RAG] Got enough results, stopping search")
                         break
                         
                 except Exception as e:
-                    print(f"Search method error: {e}")
+                    print(f"[RAG] Search method {i+1} error: {e}")
                     continue
                     
     except Exception as e:
-        print(f"Search error: {e}")
+        print(f"[RAG] Search error: {e}")
         # Return empty results instead of crashing
         pass
 
     context_text = _truncate("\n\n".join(textos), 7500)
+    print(f"[RAG] Final context length: {len(context_text)}, sources: {len(sources)}")
     return context_text, sources
 
 def buscar_web(query: str) -> Tuple[str, List[Dict[str, str]]]:
     """
-    Adaptive search: start with 6 results; if short, fetch up to 10.
+    Aggressive search: try multiple approaches to get web results.
     """
-    ctx, src = _search_web(query, max_results=6)
-    if len(ctx) < 800:
-        more_ctx, more_src = _search_web(query, max_results=10)
-        # override only if better
+    # Try with more results first
+    ctx, src = _search_web(query, max_results=15)
+    
+    # If still not enough, try with even more
+    if len(ctx) < 500:
+        print(f"[RAG] Context too short ({len(ctx)}), trying with more results")
+        more_ctx, more_src = _search_web(query, max_results=20)
+        # Combine results
         if len(more_ctx) > len(ctx):
-            ctx, src = more_ctx, more_src
+            ctx = more_ctx
+            src = more_src
+    
+    # If still no results, try a simplified query
+    if not ctx or len(ctx.strip()) < 100:
+        print(f"[RAG] Still no results, trying simplified query")
+        # Extract key terms from the query
+        key_terms = query.replace("?", "").replace("¿", "").strip()
+        simplified_ctx, simplified_src = _search_web(key_terms, max_results=10)
+        if len(simplified_ctx) > len(ctx):
+            ctx = simplified_ctx
+            src = simplified_src
+    
     if not ctx:
         ctx = "No relevant results were found on the web."
+    
+    print(f"[RAG] Final search result: {len(ctx)} chars, {len(src)} sources")
     return ctx, src
 
 def generar_respuesta_directa(query: str, system: str, user: str, model: str | None = None) -> str:
@@ -230,7 +261,7 @@ def buscar_web_y_generar(query: str, model: str | None = None):
         print(f"[RAG] Detected language: {lang}")
         
         # If no web context found, generate answer without web search
-        if not contexto or len(contexto.strip()) < 50:
+        if not contexto or len(contexto.strip()) < 20:
             print(f"[RAG] No web context found, generating answer without web search")
             if lang == "es":
                 system = (
