@@ -1,44 +1,44 @@
-import streamlit as st
-from app.rag_utils import buscar_web, generar_respuesta
+# -*- coding: utf-8 -*-
+import os, requests, streamlit as st
 
+API_URL = os.getenv("API_URL", "http://127.0.0.1:8080")
 
-st.set_page_config(page_title="AI-RAG Demo", page_icon="🧠", layout="centered")
-st.title("🧠 AI-RAG Demo")
-st.caption("Busca en la web y genera respuestas con contexto")
+st.set_page_config(page_title="AI RAG Assistant", page_icon=None, layout="centered")
 
-with st.sidebar:
-    st.subheader("Opciones")
-    max_results = st.slider("Resultados web", 1, 10, 3)
-    show_context = st.checkbox("Mostrar contexto", value=False)
+st.title("AI RAG Assistant")
+st.caption("Ask a question. The system will search the web and answer concisely, citing sources.")
 
-query = st.text_input("Pregunta", placeholder="¿Qué es el aprendizaje por refuerzo?")
+question = st.text_input("Your question", placeholder="Who won Best Picture in 2024?")
+ask = st.button("Ask", type="primary", use_container_width=False)
 
-col1, col2 = st.columns([1, 1])
-with col1:
-    go = st.button("Preguntar", type="primary")
-with col2:
-    clear = st.button("Limpiar")
-
-if clear:
-    st.rerun()
-
-if go:
-    if not query.strip():
-        st.warning("Escribe una pregunta antes de continuar.")
+if ask:
+    if not question.strip():
+        st.warning("Please enter a question.")
     else:
-        try:
-            with st.spinner("Buscando en la web..."):
-                contexto = buscar_web(query, max_results=max_results)
+        with st.spinner("Searching the web and generating an answer..."):
+            try:
+                payload = {"query": question}
+                r = requests.post(f"{API_URL}/preguntar", json=payload, timeout=120)
+                if r.status_code == 200:
+                    data = r.json()
+                    st.subheader("Answer")
+                    st.write(data.get("respuesta", "(no answer)"))
 
-            if show_context:
-                with st.expander("Contexto web"):
-                    st.write(contexto if contexto else "(Sin resultados)")
-
-            with st.spinner("Generando respuesta..."):
-                respuesta = generar_respuesta(query, contexto)
-
-            st.success("Respuesta")
-            st.write(respuesta)
-        except Exception as e:
-            st.error(f"Error: {e}")
-
+                    src = data.get("sources") or []
+                    if src:
+                        with st.expander("Sources"):
+                            for item in src:
+                                title = item.get("title", "").strip() or "(untitled)"
+                                url = item.get("url", "").strip()
+                                if url:
+                                    st.markdown(f"- [{title}]({url})")
+                                else:
+                                    st.markdown(f"- {title}")
+                else:
+                    st.error(f"Backend error {r.status_code}")
+                    try:
+                        st.code(r.json())
+                    except Exception:
+                        st.code(r.text)
+            except Exception as e:
+                st.error(f"Network error: {e}")

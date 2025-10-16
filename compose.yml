@@ -1,0 +1,28 @@
+services:
+  backend:
+    build: .
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-local}/ai-rag:latest
+    container_name: ai-rag-backend
+    environment:
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
+      LLM_MODEL: ${LLM_MODEL:-google/gemma-2-9b-it}
+    ports:
+      - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  frontend:
+    image: ghcr.io/${GITHUB_REPOSITORY_OWNER:-local}/ai-rag:latest
+    container_name: ai-rag-frontend
+    command: ["streamlit", "run", "/app/streamlit_app.py", "--server.port=8501", "--server.address=0.0.0.0"]
+    environment:
+      API_URL: http://backend:8080
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "8501:8501"
