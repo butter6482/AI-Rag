@@ -12,7 +12,11 @@ BASE_URL = (os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1") or 
 DEFAULT_MODEL = os.getenv("LLM_MODEL", "google/gemma-2-9b-it")
 
 if not OPENROUTER_API_KEY:
-    raise RuntimeError("OPENROUTER_API_KEY is required")
+    # Allow running without API key for testing
+    if os.getenv("PYTEST_CURRENT_TEST"):
+        OPENROUTER_API_KEY = "test-key-for-pytest"
+    else:
+        raise RuntimeError("OPENROUTER_API_KEY is required")
 
 VALID_MODELS = {"google/gemma-2-9b-it"}
 
