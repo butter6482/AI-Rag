@@ -1,9 +1,13 @@
 # -*- coding: utf-8 -*-
-import os, json, requests
+import os, json, requests, logging
 from typing import List, Dict, Tuple
-from duckduckgo_search import DDGS
+from ddgs import DDGS
 from bs4 import BeautifulSoup
 from dotenv import load_dotenv
+
+# Configurar logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 load_dotenv()
 
@@ -53,64 +57,77 @@ def _detect_lang(text: str) -> str:
     # Default to English
     return "en"
 
-def _search_web_simple(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]]:
+def search_web(query: str, max_results: int = 5) -> List[Dict]:
     """
-    Simple web search that actually works
+    Real web search using ddgs library
     """
-    textos: List[str] = []
-    sources: List[Dict[str, str]] = []
-    
-    # Create fake but realistic results for common queries
-    if "iphone" in query.lower() and "precio" in query.lower():
-        textos = [
-            "iPhone 15 Pro precio en Puerto Rico: $999 USD (128GB), $1099 USD (256GB), $1299 USD (512GB), $1499 USD (1TB). Disponible en Apple Store y tiendas autorizadas.",
-            "Precios iPhone 15 Pro Puerto Rico 2024: Desde $999 hasta $1499 dependiendo del almacenamiento. Incluye impuestos y envío.",
-            "iPhone 15 Pro Max precio Puerto Rico: $1199 USD (256GB), $1399 USD (512GB), $1599 USD (1TB). Comparar precios en diferentes tiendas."
-        ]
-        sources = [
-            {"title": "Apple Store Puerto Rico", "url": "https://www.apple.com/pr/iphone-15-pro/"},
-            {"title": "Best Buy Puerto Rico", "url": "https://www.bestbuy.com/site/iphone-15-pro"},
-            {"title": "Amazon Puerto Rico", "url": "https://www.amazon.com/iphone-15-pro"}
-        ]
-    elif "precio" in query.lower() and "iphone" in query.lower():
-        textos = [
-            "Precios iPhone 15 Pro: $999 (128GB), $1099 (256GB), $1299 (512GB), $1499 (1TB). Disponible en tiendas oficiales.",
-            "iPhone 15 Pro pricing: Starting at $999 for 128GB model. Available in Natural Titanium, Blue Titanium, White Titanium, and Black Titanium.",
-            "Compare iPhone 15 Pro prices: Check Apple Store, Best Buy, Amazon, and carrier stores for best deals and promotions."
-        ]
-        sources = [
-            {"title": "Apple Official Store", "url": "https://www.apple.com/iphone-15-pro/"},
-            {"title": "Best Buy", "url": "https://www.bestbuy.com/iphone-15-pro"},
-            {"title": "Amazon", "url": "https://www.amazon.com/iphone-15-pro"}
-        ]
-    else:
-        # Generic search results
-        textos = [
-            f"Información sobre: {query}. Resultados de búsqueda web actualizados.",
-            f"Búsqueda web para: {query}. Información relevante encontrada.",
-            f"Resultados de búsqueda: {query}. Datos actualizados de fuentes confiables."
-        ]
-        sources = [
-            {"title": "Resultado de búsqueda 1", "url": "https://example.com/result1"},
-            {"title": "Resultado de búsqueda 2", "url": "https://example.com/result2"},
-            {"title": "Resultado de búsqueda 3", "url": "https://example.com/result3"}
-        ]
-    
-    print(f"[RAG] Generated {len(textos)} search results")
-    return "\n\n".join(textos), sources
+    results = []
+    try:
+        logger.info(f"Searching web for: {query}")
+        with DDGS() as ddgs:
+            # text() devuelve generador; conviértelo a lista
+            for r in ddgs.text(query, max_results=max_results):
+                # r típicamente tiene 'title', 'href', 'body'
+                title = r.get("title") or ""
+                href = r.get("href") or ""
+                body = r.get("body") or ""
+                if href and (title or body):
+                    results.append({"title": title, "href": href, "body": body})
+        
+        logger.info(f"Found {len(results)} search results")
+        if results:
+            logger.info(f"First result URL: {results[0]['href']}")
+        return results
+    except Exception as e:
+        logger.error(f"Web search error: {e}")
+        return []
+
+def build_prompt(query: str, search_results: List[Dict]) -> str:
+    """
+    Build RAG prompt with real search results
+    """
+    bullets = []
+    for i, r in enumerate(search_results, start=1):
+        bullets.append(f"[{i}] {r['title']}\n{r['body']}\nURL: {r['href']}")
+    sources_block = "\n\n".join(bullets) if bullets else "No sources found."
+    return (
+        "Answer concisely using ONLY the sources below. Cite like [1], [2] and include URLs.\n\n"
+        f"SOURCES:\n{sources_block}\n\n"
+        f"QUESTION: {query}\n"
+        "ANSWER:"
+    )
 
 def _search_web(query: str, max_results: int) -> Tuple[str, List[Dict[str, str]]]:
     """
-    Simple web search that works
+    Web search that returns context and sources
     """
-    print(f"[RAG] Searching for: {query}")
-    return _search_web_simple(query, max_results)
+    logger.info(f"[RAG] Searching for: {query}")
+    search_results = search_web(query, max_results)
+    
+    if not search_results:
+        logger.warning("No search results found")
+        return "", []
+    
+    # Build context from search results
+    context_parts = []
+    sources = []
+    
+    for i, result in enumerate(search_results, 1):
+        context_parts.append(f"[{i}] {result['title']}\n{result['body']}")
+        sources.append({
+            "title": result['title'],
+            "url": result['href']
+        })
+    
+    context = "\n\n".join(context_parts)
+    logger.info(f"[RAG] Generated context with {len(sources)} sources, length: {len(context)}")
+    return context, sources
 
 def buscar_web(query: str) -> Tuple[str, List[Dict[str, str]]]:
     """
-    Simple web search
+    Web search with real results
     """
-    ctx, src = _search_web(query, max_results=10)
+    ctx, src = _search_web(query, max_results=5)
     return ctx, src
 
 def generar_respuesta_directa(query: str, system: str, user: str, model: str | None = None) -> str:
@@ -211,16 +228,16 @@ def generar_respuesta(query: str, contexto: str, lang_hint: str | None = None, m
 
 def buscar_web_y_generar(query: str, model: str | None = None):
     try:
-        print(f"[RAG] Searching for: {query}")
+        logger.info(f"[RAG] Searching for: {query}")
         contexto, sources = buscar_web(query)
-        print(f"[RAG] Found {len(sources)} sources, context length: {len(contexto)}")
+        logger.info(f"[RAG] Found {len(sources)} sources, context length: {len(contexto)}")
         
         lang = _detect_lang(query)
-        print(f"[RAG] Detected language: {lang}")
+        logger.info(f"[RAG] Detected language: {lang}")
         
         # If no web context found, generate answer without web search
         if not contexto or len(contexto.strip()) < 20:
-            print(f"[RAG] No web context found, generating answer without web search")
+            logger.warning(f"[RAG] No web context found, generating answer without web search")
             if lang == "es":
                 system = (
                     "Eres un asistente útil que responde en español. "
@@ -247,7 +264,7 @@ def buscar_web_y_generar(query: str, model: str | None = None):
         answer = generar_respuesta(query, contexto, lang_hint=lang, model=model)
         return {"contexto": contexto, "respuesta": answer, "sources": sources}
     except Exception as e:
-        print(f"[RAG] Error: {e}")
+        logger.error(f"[RAG] Error: {e}")
         # Return a safe fallback response
         return {
             "contexto": "No se pudo obtener contexto web debido a un error técnico.",
